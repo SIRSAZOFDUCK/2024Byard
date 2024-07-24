@@ -14,7 +14,7 @@ path.data.prescribing <- "E:/EPD_DATA"
 
 # Identify uninstalled packages
 
-list.of.packages <- c("data.table","dplyr","plyr","RColorBrewer","ggplot2","corrplot","rgdal","rgeos","raster","maptools","scales","plotly","latticeExtra","maps","classInt","grid","pals","reshape2","cowplot","sandwich","msm","Cairo")
+list.of.packages <- c("data.table","dplyr","plyr","RColorBrewer","ggplot2","corrplot","rgdal","rgeos","raster","maptools","scales","plotly","latticeExtra","maps","classInt","grid","pals","reshape2","cowplot","sandwich","msm","Cairo", "stringr")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
@@ -110,7 +110,8 @@ included.months <- list("201501","201502","201503", "201504", "201505", "201506"
                         "201701","201702","201703", "201704", "201705", "201706", "201707", "201708", "201709", "201710", "201711", "201712",
                         "201801","201802","201803", "201804", "201805", "201806", "201807", "201808", "201809", "201810", "201811", "201812",
                         "201901","201902","201903", "201904", "201905", "201906", "201907", "201908", "201909", "201910", "201911", "201912",
-                        "202001","202002","202003", "202004", "202005")
+                        "202001","202002","202003", "202004", "202005", "202006")
+
 
 # Create directory to save precribing outputs and results
 
@@ -387,7 +388,7 @@ data <- all.data %>%
 low.rx <- data %>%
   filter(items <1000)
 
-if (nrow(low.rx) == 0){
+if (nrow(low.rx) == 0 & nrow(data) == 66){
 
 # Calculate prescribing rates per 1000 people per year
 data <- data %>%
@@ -395,7 +396,7 @@ data <- data %>%
 
 # Allocate to pre or post-lockdown timeframes
 data$intervention <- 0 #starts column of zeros
-data$intervention[c(64:65)] <- 1 #add 1 to intervention rows which are after intervention
+data$intervention[c(64:66)] <- 1 #add 1 to intervention rows which are after intervention
 
 # Add time column
 data$time <- 1:nrow(data) #add "time" starting at 1 from month 1
@@ -434,7 +435,7 @@ cis <- ci.exp(model)
 # Reform data frame with 0.1 time units to improve plotting
 datanew <- data.frame(listsize=mean(data$listsize),intervention=rep(c(0,1),c(630,90)),
                       time= 1:720/10,month=rep(1:120/10,6))
-datanew <- datanew[1:650,]
+datanew <- datanew[1:660,]
 
 # Save plot
 
@@ -470,13 +471,13 @@ rect(66,ymin,63,ymax,col=grey(0.9),border=F)
 points(data$items.per.1000,cex=0.7, pch=19)
 axis(1,at=0:5*12,labels=F)
 axis(1,at=0:5*12,tick=F,labels=2015:2020)
-lines(1:650/10,pred,col=2)
+lines(1:660/10,pred,col=2)
 title(paste0("Drug class: ", bnf.name[1,2],"\nBNF code: ",bnf.name[1,1]), cex.main = 1)
 
 # Predict and plot the deseasonalised trend
 pred2b <- predict(model,type="response",transform(datanew,month=6))/
   mean(data$listsize)*10^3
-lines(1:650/10,pred2b,col=3,lty=2)
+lines(1:660/10,pred2b,col=3,lty=2)
 
 
 dev.off()
@@ -520,5 +521,179 @@ results$`p value` <- ifelse(results$`p value` < 0.0001, "< 0.0001", results$`p v
 write.csv(results, "Results_drug_class.csv", row.names = F)  
   
 
+## INDIVIDUAL DRUGS: PROCESS DATA -----------
 
+# Clear environment (except project paths)
+keep <-c("path.project", "path.data.prescribing")
+rm(list = setdiff(ls(), keep))
+
+
+# Read in drug class data
+setwd(path.project)
+all.data <- read.csv("aggregate_data_by_drug.csv") %>%
+  # Extract chapter
+  mutate(chapter = as.numeric(substr(bnf.code, 1,2))) %>% 
+  filter(chapter <15) %>% # get rid of chapters 15 onwards
+  dplyr::select(-chapter)
+
+# Create bnf code-to-name lookup
+bnf.lookup <- read.csv("bnf_codes_table.csv") %>%
+  mutate(bnf.code = BNF.Chemical.Substance.Code) %>%
+  mutate(bnf.name = BNF.Chemical.Substance) %>%
+  dplyr::select(15,16) %>%
+  unique()
+
+# Identify unique drug classes
+drug.list <- all.data %>% pull(bnf.code) %>% unique()
+
+# Prime a dataframe for the results
+column_names <- c("bnf.code", "drug.class", "irr", "lcl", "ucl", "pval")
+results <- data.frame(matrix(ncol = length(column_names), nrow = 0))
+colnames(results) <- column_names
+
+# Set to results directory
+setwd(paste0(path.project,"/results_drugs"))
+
+
+## INDIVIDUAL DRUGS: ANALYSE DATA AND SAVE OUTPUTS: LOOP ------------
+
+for (i in 1:length(drug.list)){
+  
+  data <- all.data %>% 
+    filter(bnf.code == drug.list[i]) 
+  
+  # Check at least 1000 items prescribed each month
+  low.rx <- data %>%
+    filter(items <1000)
+  
+  if (nrow(low.rx) == 0 & nrow(data) == 66){
+    
+    # Calculate prescribing rates per 1000 people per year
+    data <- data %>%
+      mutate(items.per.1000 = 1000*items/listsize)
+    
+    # Allocate to pre or post-lockdown timeframes
+    data$intervention <- 0 #starts column of zeros
+    data$intervention[c(64:66)] <- 1 #add 1 to intervention rows which are after intervention
+    
+    # Add time column
+    data$time <- 1:nrow(data) #add "time" starting at 1 from month 1
+    
+    # Poisson ITS (to include time trend and seasonal adjustment)
+    model <- glm(items ~ offset(log(listsize)) + intervention + time + harmonic(month,2,12), family=quasipoisson, data)
+    summary <- summary(model)
+    cis <- ci.exp(model)
+    
+    # Add key results to results dataframe
+    
+    # BNF code
+    results[i,1] <- drug.list[i]
+    
+    # BNF name
+    bnf.name <- data.frame(drug.list[i]) %>%
+      rename("bnf.code" = 1) %>%
+      left_join(bnf.lookup, by = "bnf.code")
+    
+    results[i,2] <- bnf.name[1,2]
+    
+    # IRR
+    results[i,3] <- round(cis[2,1],3)
+    
+    # Lower CI
+    results[i,4] <- round(cis[2,2],3)
+    
+    # Upper CI
+    results[i,5] <- round(cis[2,3],3)
+    
+    # P value
+    results[i,6] <- round(summary$coefficients["intervention", "Pr(>|t|)"],4)
+    
+    
+    # Reform data frame with 0.1 time units to improve plotting
+    datanew <- data.frame(listsize=mean(data$listsize),intervention=rep(c(0,1),c(630,90)),
+                          time= 1:720/10,month=rep(1:120/10,6))
+    datanew <- datanew[1:660,]
+    
+    # Save plot
+    
+    Cairo(file=paste0("Drug class ",drug.list[i]," ",bnf.name[1,2],".png"), 
+          type="png",
+          units="in", 
+          width=5, 
+          height=4, 
+          pointsize=8, 
+          dpi=1200)
+    
+    # Identify max precribing rate
+    ymax <- data %>%
+      pull(items.per.1000) %>%
+      max()
+    
+    # Define y-axis upper limit
+    ymax <- ceiling(ymax/5)*5
+    
+    # Identify max precribing rate
+    ymin <- data %>%
+      pull(items.per.1000) %>%
+      min()
+    
+    # Define y-axis upper limit
+    ymin <- floor(ymin/10)*5
+    
+    # Plot model... ADD: flexible y axis
+    pred <- predict(model,type="response",datanew)/mean(data$listsize)*10^3
+    plot(data$items.per.1000,type="n",ylim=c(ymin,ymax),xlab="Year",ylab="Items per 1000 registered patients",
+         bty="l",xaxt="n")
+    rect(66,ymin,63,ymax,col=grey(0.9),border=F)
+    points(data$items.per.1000,cex=0.7, pch=19)
+    axis(1,at=0:5*12,labels=F)
+    axis(1,at=0:5*12,tick=F,labels=2015:2020)
+    lines(1:660/10,pred,col=2)
+    title(paste0("Drug class: ", bnf.name[1,2],"\nBNF code: ",bnf.name[1,1]), cex.main = 1)
+    
+    # Predict and plot the deseasonalised trend
+    pred2b <- predict(model,type="response",transform(datanew,month=6))/
+      mean(data$listsize)*10^3
+    lines(1:660/10,pred2b,col=3,lty=2)
+    
+    
+    dev.off()
+    
+  }  else {
+    
+    # Do nothing
+    
+  }
+  
+}
+
+
+## INDIVIDUAL DRUGS: SAVE ALL RESULTS ---------------
+
+# Clean results output 
+
+results <- results %>%
+  # Remove empty rows
+  filter(rowSums(is.na(.)) != ncol(results)) %>%
+  # Order by lowest p value
+  arrange(pval) %>%
+  # Create single column with 95% CIs
+  mutate(ci = paste0("(",format(round(lcl,3), nsmall = 3)," - ",format(round(ucl,3), nsmall = 3),")")) %>%
+  # Remove defunct columns
+  dplyr::select(-c(ucl, lcl)) %>%
+  # Reorder columns
+  dplyr::select(bnf.code, drug.class, irr, ci, pval) %>%
+  rename(
+    "BNF code" = bnf.code,
+    "Drug" = drug.class,
+    "IRR change" = irr,
+    "95% CI" = ci,
+    "p value" = pval
+  )
+
+# Say if p value is small
+results$`p value` <- ifelse(results$`p value` < 0.0001, "< 0.0001", results$`p value`)
+
+# Save
+write.csv(results, "Results_individual_drugs.csv", row.names = F)  
 
