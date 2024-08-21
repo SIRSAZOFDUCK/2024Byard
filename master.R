@@ -429,7 +429,7 @@ cis <- ci.exp(model)
   results[i,5] <- round(cis[2,3],3)
   
   # P value
-  results[i,6] <- round(summary$coefficients["intervention", "Pr(>|t|)"],4)
+  results[i,6] <- round(summary$coefficients["intervention", "Pr(>|t|)"],5)
   
 
 # Reform data frame with 0.1 time units to improve plotting
@@ -515,7 +515,7 @@ results <- results %>%
   )
 
 # Say if p value is small
-results$`p value` <- ifelse(results$`p value` < 0.0001, "< 0.0001", results$`p value`)
+results$`p value` <- ifelse(results$`p value` < 0.00001, "< 0.00001", results$`p value`)
 
 # Save
 write.csv(results, "Results_drug_class.csv", row.names = F)  
@@ -606,7 +606,7 @@ for (i in 1:length(drug.list)){
     results[i,5] <- round(cis[2,3],3)
     
     # P value
-    results[i,6] <- round(summary$coefficients["intervention", "Pr(>|t|)"],4)
+    results[i,6] <- round(summary$coefficients["intervention", "Pr(>|t|)"],5)
     
     
     # Reform data frame with 0.1 time units to improve plotting
@@ -692,7 +692,7 @@ results <- results %>%
   )
 
 # Say if p value is small
-results$`p value` <- ifelse(results$`p value` < 0.0001, "< 0.0001", results$`p value`)
+results$`p value` <- ifelse(results$`p value` < 0.00001, "< 0.00001", results$`p value`)
 
 # Save
 write.csv(results, "Results_individual_drugs.csv", row.names = F)  
